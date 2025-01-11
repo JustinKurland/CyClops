@@ -1,0 +1,6 @@
+pytest          # For testing
+flake8          # For linting
+black           # For code formatting
+isort           # For sorting imports
+mypy            # For type checking
+pre-commit      # For pre-commit hooks
