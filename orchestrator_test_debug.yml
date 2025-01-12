@@ -1,0 +1,20 @@
+orchestrator_test:
+  tags:
+    - linux
+    - default
+    - kubernetes
+  stage: test
+  image: registry.aws.site.gs.com:443/dx/py-eng/python-images/python3.9-rhel8-prod:current
+  script:
+    - echo "Checking available Python commands..."
+    - which python || echo "python command not found"
+    - which python3 || echo "python3 command not found"
+    - python --version || echo "python not installed"
+    - python3 --version || echo "python3 not installed"
+    - pip install -r requirements-dev.txt
+    - python3 src/cycad/orchestrator.py  # Use python3 instead of python as a potential fix
+  environment:
+    name: nonprod
+  only:
+    - branches
+    - /^dev-.*/
