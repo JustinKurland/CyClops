@@ -1,0 +1,455 @@
+# ================================================================================================
+# Stages: Define the CI/CD Pipeline Workflow
+# Purpose:
+# The `stages` section defines the sequential order in which the CI/CD pipeline jobs are executed.
+#
+# Key Features:
+# - Each job is assigned to a specific stage.
+# - All jobs in a stage must complete successfully before the pipeline proceeds to the next stage.
+# - Stages are executed in the exact order listed below.
+#
+# Workflow:
+# - This structured approach ensures that tasks such as building, testing, deploying, 
+#   and compliance scanning are performed in the correct sequence.
+# ================================================================================================
+stages:
+  - conduit_managed_build    # Stage for conduit-managed build processes
+  - conduit_managed_deploy   # Stage for conduit-managed deployment processes
+  - build_image              # Stage to build Docker images
+  - image-transfer           # Stage to transfer Docker images to the registry
+  - p3_deploy                # Stage to deploy artifacts to the non-production environment
+  - clmscan                  # Stage for compliance and vulnerability scanning
+  - test                     # Stage for running orchestrator or other tests
+  - etch_test                # Stage for executing ETCH (Enhanced Test Coverage Harness) tests
+  - etch_upload              # Stage for uploading ETCH test results
+
+# ================================================================================================
+# Include: Reuse Configurations
+# Purpose:
+# The `include` directive allows the CI/CD pipeline to incorporate configurations 
+# from external or local `.yml` files, enabling modularity and reducing redundancy.
+#
+# Key Features:
+# - Facilitates reuse of predefined jobs, variables, or stages.
+# - Simplifies maintenance by centralizing shared configurations.
+#
+# Workflow:
+# - In this case, the pipeline includes `.conduit-ci.yml`, which likely provides
+#   additional pipeline components or reusable configurations specific to the project.
+# ================================================================================================
+include:
+  - /.conduit-ci.yml  # Import configurations and jobs from the external .conduit-ci.yml file
+
+# ================================================================================================
+# Variables Section
+# Purpose:
+# This section defines global environment variables that are used throughout the pipeline. 
+# These variables reduce redundancy and centralize configuration values, making the pipeline 
+# easier to maintain and adapt for different environments or projects.
+#
+# Key Features:
+# - Simplifies pipeline configuration by avoiding hardcoding values.
+# - Ensures consistent variable usage across jobs and stages.
+# - Provides flexibility to adjust job parameters without modifying individual jobs.
+#
+# Variable Descriptions:
+# - `DID`: Unique identifier for the deployment or job, sourced externally.
+# - `PROCOM_PATH`: Path to the ProCom directory for the project.
+# - `API_GATEWAY`: API gateway endpoint for the deployment environment.
+# - `IMAGE`: Docker image used for builds and deployments.
+# - `DISK`, `MEMORY`, `CPU`: Resource allocation for pipeline jobs.
+# - `USERNAME`: Principal username for authentication.
+# - `CREDENTIALS`: Masked credentials for secure access.
+# - `COMMAND`: The primary command to execute the data collection script.
+# ================================================================================================
+variables:
+  DID: ${DID}                    # Unique identifier for the deployment or job; sourced from an external environment or CI/CD configuration.
+  PROCOM_PATH: ${PROCOM_FOREST}  # Path to the ProCom directory in the project.
+  API_GATEWAY: ${P3_MASTER}      # API gateway endpoint for the deployment environment.
+  IMAGE: registry.aws.site.gs.com:443/tech-risk/techrisk-cfc/${CI_PROJECT_NAME}:nonprod_current
+                                 # Docker image used for the build or deployment; tied to the current branch in a non-production environment.
+  DISK: 8GB                      # Disk size allocated for this pipeline job.
+  MEMORY: 4GB                    # Memory allocated for this pipeline job.
+  CPU: 4                         # CPU cores allocated for this pipeline job.
+  USERNAME: ${CI_P3_PRINCIPAL}   # Principal username used for authentication with ProCom or other services.
+  CREDENTIALS: ${CREF}           # Reference to a masked credential list for secure access (e.g., non-production Unix/GS.COM accounts).
+  COMMAND: python3 scripts/data_collection.py  
+                                 # Command to execute the primary data collection script.
+
+# ================================================================================================
+# Job: dev_collection
+# Purpose:
+# This job is part of the `p3_deploy` stage and runs in the non-production 
+# environment to execute a data collection process.
+#
+# Key Features:
+# - Prepares the environment using a keytab for authentication.
+# - Installs the P3 client CLI tool to execute the data collection process.
+# - Executes the `p3_client_submit` command with various parameters.
+#
+# Workflow:
+# - Sets up authentication with a keytab.
+# - Installs necessary dependencies.
+# - Runs the data collection script using the P3 client.
+# - Designed for manual triggering to allow better control.
+# ================================================================================================
+dev_collection:               # Job definition for the development environment
+  tags:                       # Runner tags for this job
+    - linux                   # Use Linux-based runners
+    - default                 # Use the default runner tag
+    - kubernetes              # Use Kubernetes runners
+  stage: p3_deploy            # Specifies that this job belongs to the p3_deploy stage
+  image: registry.aws.site.gs.com:443/dx/py-eng/python-images/python3.9-rhel8-prod:current
+                              # Docker image to provide a Python 3.9 runtime environment
+  variables:                  # Environment variables specific to this job
+    NAME: dev_collection      # Name for logging and job identification
+
+  before_script:              # Pre-script commands to set up the environment
+    - >                       # Create a temporary keytab file in the current directory
+      p3_keytab=$(mktemp -p .)
+    - >                       # Decode the CI-provided keytab and save it
+      echo "${CI_P3_KEYTAB_BASE64:?CI_P3_KEYTAB_BASE64 is not set. Please define and mask it.}" \
+      | openssl enc -A -a -d -out ${p3_keytab}
+    - >                       # Authenticate using the generated keytab file
+      kinit -t ${p3_keytab} "${CI_P3_PRINCIPAL:?}"
+    - pip install gsinternal-p3-client-cli==0.4.2  
+                              # Install the P3 client CLI tool for running the submission command
+
+  script:                     # Main script to execute the P3 client submission command
+    - >
+      p3_client_submit --name ${NAME:?} --did ${DID:?} --username ${USERNAME:?} \
+      --procmon-path ${PROCOM_PATH:?} --image ${IMAGE:?} --credentials ${CREDENTIALS:?} \
+      --command "${COMMAND:?}" --cluster-name ${CLUSTER_NAME:-'prod_i'} \
+      --api-gateway "p3-uat-1.procom.nimbus.gs.com:443" \
+      --region "${REGION:-'PUB1::psrp_oci_default'}" \
+      --cpu ${CPU:-'0.0'} --disk ${DISK:-'0'} --memory ${MEMORY:-'0'} \
+      --instance "${INSTANCE:-'default-name'}" --cron "${CRON}" \
+      --delay-sec "${DELAY:-''}" --force ${ENV_VARS:+--env-vars ${ENV_VARS:?}}
+
+  environment:                # Specifies the environment for this job
+    name: nonprod             # Non-production environment for testing
+  when: manual                # This job must be triggered manually
+
+# Job: prod_collection
+# This job is designed for running production-specific data collection tasks.
+# It inherits the configuration from the 'dev_collection' job for consistency
+# but overrides key variables to define production-specific behavior.
+#
+# Key Overrides:
+# - IMAGE: Specifies the Docker image used for production, tagged with the release version.
+# - NAME: Sets the name of the job as 'prod_collection'.
+# - COMMAND: Executes the production data collection script.
+#
+# Conditions:
+# - Runs only on branches that follow the naming pattern 'release-*'.
+# - Executes in the 'prod' environment to maintain strict environment isolation.
+# ================================================================================================
+prod_collection:           # Job definition for the production environment
+  extends: dev_collection  # Reuse configuration from the 'dev_collection' job
+  variables:               # Define production-specific variables
+    IMAGE: registry.aws.site.gs.com:443/tech-risk/techrisk-cfc/${CI_PROJECT_NAME}:${RELEASE}
+                           # Docker image for production with a release-specific tag
+    NAME: prod_collection  # Name of the production job
+    COMMAND: python3 scripts/data_collection.py  
+                           # Production data collection command
+  environment:             # Define the environment for this job
+    name: prod             # Assign the job to the production environment
+  only:                    # Specify the branches where this job will execute
+    - /^release-.*$/       # Restrict to branches matching the naming pattern 'release-*'
+
+# ================================================================================================
+# Job: prod_cron_main
+# This job is designed to schedule and run production-specific data collection tasks
+# on a regular basis using a CRON schedule. It extends the 'dev_collection' job
+# for shared configurations and overrides key variables for production behavior.
+#
+# Key Overrides:
+# - IMAGE: Specifies the Docker image used for production, tagged with the release version.
+# - NAME: Sets the name of the job as 'prod_cron_main'.
+# - COMMAND: Executes the production data collection script.
+# - CRON: Configures the job to run daily at 8:05 AM Eastern time.
+#
+# Conditions:
+# - Runs only on branches that follow the naming pattern 'release-*'.
+# - Executes in the 'prod' environment to maintain strict production isolation.
+# ================================================================================================
+prod_cron_main:            # Job definition for scheduled production tasks
+  extends: dev_collection  # Reuse configuration from the 'dev_collection' job
+  variables:               # Define production-specific variables
+    IMAGE: registry.aws.site.gs.com:443/tech-risk/techrisk-cfc/${CI_PROJECT_NAME}:${RELEASE}
+                          # Docker image for production with a release-specific tag
+    NAME: prod_cron_main  # Name of the production cron job
+    COMMAND: python3 scripts/data_collection.py  
+                          # Command for data collection
+    CRON: '5 8 * * *'     # Schedule: Daily at 8:05 AM Eastern (shifts with UTC offset)
+                          # CRON expression: '5 8 * * *' (Minute Hour Day Month DayOfWeek)
+  environment:            # Define the environment for this job
+    name: prod            # Assign the job to the production environment
+  only:                   # Specify the branches where this job will execute
+    - /^release-.*$/      # Restrict to branches matching the naming pattern 'release-*'
+
+# ================================================================================================
+# Job: build_image_nonprod
+# This job is responsible for building a Docker image in the non-production environment.
+# It uses the `kaniko` tool to build the image and push it to the registry.
+#
+# Key Features:
+# - Uses a base image defined in the `BASE_IMG` variable.
+# - The build process includes passing build arguments for the Git token, environment,
+#   project directory, and other relevant variables.
+# - Executes only when changes are detected in the Dockerfile or `scripts/data_collection.py`.
+#
+# Retry Policy:
+# - Retries the job twice in case of failures.
+#
+# Conditions:
+# - Runs only in the `nonprod` environment.
+# ================================================================================================
+build_image_nonprod:  # Job definition for building Docker images in non-production
+  stage: build_image  # Assign to the build_image stage
+  tags:               # Define tags for runner selection
+    - kubernetes
+    - linux
+    - default
+  image: registry.aws.site.gs.com:443/dx/containers/build-image:latest
+                     # Base image used for executing the build job
+  variables:         # Define variables for the job
+    BASE_IMG: registry.aws.site.gs.com:443/dx/py-eng/python-images/python3.9-rhel8-prod:current
+                     # Specify the Python base image for the build
+  script:            # Define the commands to execute in the job
+    - echo "Building docker image using ${BASE_IMG}"
+    - kaniko -c ${CI_PROJECT_DIR} \
+        -d ${CI_REGISTRY_IMAGE}:nonprod_current \
+        --build-arg BASE_IMG=${BASE_IMG} \
+        --build-arg GIT_TOKEN=${CI_JOB_TOKEN} \
+        --build-arg ENVIRONMENT=${CI_ENVIRONMENT_NAME} \
+        --build-arg DID=${DID} \
+        --build-arg CREF=${CREF}
+                     # Execute the Kaniko build command with all required arguments
+  environment:       # Define the environment for this job
+    name: nonprod    # Assign this job to the non-production environment
+  retry:             # Retry the job in case of failure
+    max: 2           # Allow up to two retries
+  only:              # Specify the conditions for executing the job
+    changes:         # Trigger only when specific files are modified
+      - Dockerfile   # Trigger on changes to the Dockerfile
+      - scripts/data_collection.py  
+                     # Trigger on changes to the data collection script
+
+# ================================================================================================
+# Job: build_image_prod
+# This job builds a Docker image specifically for the production environment.
+# It uses the `kaniko` tool to build the image and push it to the registry.
+#
+# Key Features:
+# - Extends the configuration from `build_image_nonprod` to reuse its logic.
+# - Adjusts the `kaniko` script to use the production image tag `${RELEASE}`.
+#
+# Environment:
+# - Runs in the `prod` environment only.
+#
+# Trigger Conditions:
+# - Executes when there is a release branch (`/^release-.*$/`).
+# ================================================================================================
+build_image_prod:               # Job definition for building Docker images in production
+  extends: build_image_nonprod  # Reuse configuration from the non-production job
+  script:                       # Override the script for production-specific build
+    - echo "Building docker image using ${BASE_IMG}"  
+                                # Log the base image being used
+    - kaniko -c ${CI_PROJECT_DIR} \
+        -d ${CI_REGISTRY_IMAGE}:${RELEASE} \
+        --build-arg BASE_IMG=${BASE_IMG} \
+        --build-arg GIT_TOKEN=${CI_JOB_TOKEN} \
+        --build-arg ENVIRONMENT=${CI_ENVIRONMENT_NAME} \
+        --build-arg DID=${DID} \
+        --build-arg CREF=${CREF}
+                                # Build the Docker image with production-specific arguments using Kaniko
+  environment:                  # Define the environment for this job
+    name: prod                  # Assign this job to the production environment
+  only:                         # Specify the conditions for executing the job
+    - /^release-.*$/            # Run only on release branches
+
+# ================================================================================================
+# Job: image_transfer_nonprod
+# This job transfers a built Docker image to a specific non-production registry.
+#
+# Key Features:
+# - Runs in the `image-transfer` stage of the CI/CD pipeline.
+# - Transfers the image using the `image-transfer` tool with the `nonprod_current` tag.
+#
+# Environment:
+# - Executes within the `nonprod` environment.
+#
+# Retry Logic:
+# - Retries the job up to 2 times in case of failure.
+#
+# Trigger Conditions:
+# - Runs only when changes are made to the `Dockerfile` or `scripts/data_collection.py`.
+# ================================================================================================
+image_transfer_nonprod:  # Job definition for transferring Docker images in non-production
+  stage: image-transfer  # Assign this job to the `image-transfer` stage
+  tags:                  # Define the tags to determine where the job runs
+    - kubernetes
+    - linux
+    - default
+  image: registry.aws.site.gs.com:443/procmon/psrp/psrp-registry-service-client:current  
+                       # Docker image for the job environment
+  script:              # Commands to execute in this job
+    - image-transfer \
+        --image-name ${CI_PROJECT_PATH} \
+        --image-tag nonprod_current
+                       # Transfer the Docker image to the non-production registry
+  environment:         # Define the environment for this job
+    name: nonprod      # Assign this job to the non-production environment
+  retry:               # Retry configuration
+    max: 2             # Retry up to 2 times in case of failure
+  only:                # Specify the conditions for running the job
+    changes:           # Run the job only when the following files are modified
+      - Dockerfile
+      - scripts/data_collection.py
+
+# ================================================================================================
+# Job: image_transfer_prod
+# This job transfers a built Docker image to a specific production registry.
+#
+# Key Features:
+# - Extends the `image_transfer_nonprod` job configuration, inheriting its settings.
+# - Transfers the image using the `image-transfer` tool with the `RELEASE` tag.
+#
+# Environment:
+# - Executes within the `prod` environment.
+#
+# Trigger Conditions:
+# - Runs only on release branches, identified by branch names starting with `release-`.
+# ================================================================================================
+image_transfer_prod:               # Job definition for transferring Docker images in production
+  extends: image_transfer_nonprod  # Inherit configuration from the `image_transfer_nonprod` job
+  script:                          # Commands to execute in this job
+    - image-transfer \
+        --image-name ${CI_PROJECT_PATH} \
+        --image-tag ${RELEASE}
+                                  # Transfer the Docker image to the production registry
+  environment:                    # Define the environment for this job
+    name: prod                    # Assign this job to the production environment
+  only:                           # Specify the conditions for running the job
+    - /^release-.*$/              # Run the job only on release branches
+
+# ================================================================================================
+# Job: orchestrator_test
+# This job runs the orchestrator script in a non-production environment.
+#
+# Key Features:
+# - Ensures orchestrator logic is tested before deployment to production.
+# - Installs development dependencies and executes the orchestrator.
+#
+# Environment:
+# - Runs in the `nonprod` environment for safety during testing.
+#
+# Trigger Conditions:
+# - Executes only on development branches matching the `dev-` pattern.
+# ================================================================================================
+orchestrator_test:   # Job definition for testing the orchestrator functionality
+  tags:              # Specify the runner tags for this job
+    - linux          # Use Linux-based runners
+    - default        # Default runner tag
+    - kubernetes     # Run on Kubernetes infrastructure
+  stage: test        # Assign this job to the "test" stage
+  image: registry.aws.site.gs.com:443/dx/py-eng/python-images/python3.9-rhel8-prod:current
+                     # Use a Python 3.9-based container image for the job
+  script:            # Commands to execute in this job
+    - pip install -r requirements-dev.txt  
+                     # Install all development dependencies
+    - python src/cycad/orchestrator.py     
+                     # Run the orchestrator script to verify functionality
+  environment:       # Define the environment for this job
+    name: nonprod    # Restrict execution to the non-production environment
+  only:              # Specify the conditions for running the job
+    - branches       # Run the job only on branches
+    - /^dev-.*/      # Restrict execution to branches matching the "dev-" pattern
+
+# ================================================================================================
+# Job: etch_test
+# This job executes the `build_test.sh` script to perform tests related to ETCH.
+#
+# Key Features:
+# - Ensures the `build_test.sh` script is executable and runs without errors.
+# - Outputs test artifacts in XML format for further analysis.
+#
+# Retry Policy:
+# - Retries the job up to 2 times if it fails due to transient errors.
+#
+# Artifacts:
+# - Saves the results of the tests (in XML format) to the `target` directory for pipeline analysis.
+# ================================================================================================
+etch_test:  # Job definition for running the ETCH test script
+  stage: etch_test  # Assign this job to the "etch_test" stage
+  script:  # Commands to execute in this job
+    - chmod +x ./build_test.sh  # Ensure the test script is executable
+    - ./build_test.sh           # Run the test script
+  dependencies: []  # No dependencies on other jobs in the pipeline
+  retry:  # Define retry behavior
+    max: 2  # Retry up to 2 times if the job fails
+  artifacts:  # Specify output files to retain after job completion
+    paths:  # Define paths for files to save as artifacts
+      - target/**/*.xml  # Save all XML files in the "target" directory
+
+# ================================================================================================
+# Job: etch_upload
+# This job performs the upload operation using the cloud ETCH uploader.
+#
+# Key Features:
+# - Utilizes a pre-defined cloud upload command specified in the `CLOUD_ETCH_UPLOAD` variable.
+# - Runs in the "etch_upload" stage of the CI/CD pipeline.
+#
+# Retry Policy:
+# - Retries the job up to 2 times in case of transient errors (e.g., network issues).
+#
+# Tags:
+# - Uses the `standard` runner tag.
+#
+# Image:
+# - Employs a Docker image specifically configured for the ETCH uploader.
+# ================================================================================================
+etch_upload:              # Job definition for the ETCH upload operation
+  stage: etch_upload      # Assign this job to the "etch_upload" stage
+  tags:                   # Define runner tags for this job
+    - standard            # Use the standard runner for this job
+  image: registry.aws.site.gs.com:443/dx/ete/cloudetch-uploader:current  
+                          # Docker image configured for the ETCH uploader
+  script:                 # Command to execute in this job
+    - $CLOUD_ETCH_UPLOAD  # Execute the cloud upload command specified in the variable
+  retry:                  # Define retry behavior
+    max: 2                # Retry up to 2 times if the job fails
+
+# ==========================================
+# Job: request_clmscan
+# Purpose:
+# This job performs a CLM (Component Lifecycle Management) scan to ensure 
+# compliance and detect potential vulnerabilities or issues in the project directory.
+#
+# Key Features:
+# - Utilizes the GitLab CLM plugin for scanning.
+# - Executes as part of the "clmscan" stage in the CI/CD pipeline.
+# - Designed to ensure the codebase adheres to security and compliance requirements.
+#
+# Runner Configuration:
+# - Runs on Linux-based Kubernetes runners with the "default" tag.
+#
+# Docker Image:
+# - Uses a specific image tailored for the GitLab CLM plugin to handle scanning.
+#
+# Execution:
+# - The scan is performed using `/opt/clm/request-clmscan.sh` with the project directory.
+# ==========================================
+request_clmscan:
+  stage: clmscan     # This job belongs to the "clmscan" stage
+  tags:              # Runner tags
+    - kubernetes     # Run on Kubernetes runners
+    - linux          # Ensure the runner supports Linux
+    - default        # Use the default tag for runner selection
+  image: gitlab.registry.docker.site.gs.com:443/dx/sdlc-tools/gitlab-clm-plugin/gitlab-clm-plugin:current
+                     # Docker image configured for the GitLab CLM plugin
+  before_script: []  # No preliminary setup required before the script
+  script:
+    - /opt/clm/request-clmscan.sh ${CI_PROJECT_DIR}  
+                     # Run the CLM scan script on the project directory specified by ${CI_PROJECT_DIR}
