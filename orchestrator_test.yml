@@ -1,0 +1,15 @@
+orchestrator_test:
+  tags:
+    - linux
+    - default
+    - kubernetes
+  stage: test  # Assign this job to the newly added test stage
+  image: registry.aws.site.gs.com:443/dx/py-eng/python-images/python3.9-rhel8-prod:current
+  script:
+    - pip install -r requirements-dev.txt
+    - python src/cycad/orchestrator.py
+  environment:
+    name: nonprod
+  only:
+    - branches
+    - /^dev-.*/  # Ensure this runs only on development branches
