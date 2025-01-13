@@ -1,0 +1,37 @@
+# ================================================================================================
+# File: .gs-project.yml
+# Purpose:
+# This file contains the configuration details specific to the project, including settings for
+# product identification, Conduit management, and ETCH test results.
+#
+# Key Features:
+# - Defines the `productGuid` to uniquely identify the project.
+# - Configures Conduit management options for realms, deployment, and tags.
+# - Specifies ETCH test result paths for storing test output.
+#
+# Structure:
+# - `productGuid`: Identifies the project across systems.
+# - `conduit`: Contains Conduit-specific settings for realms, deployments, and tags.
+# - `etch`: Configures paths for ETCH test results.
+# ================================================================================================
+productGuid: "product::704171"   # Unique identifier for the product used across systems.
+
+conduit:                        # Conduit-specific configurations
+  autoManageRealms: true        # Automatically manage realms for this project.
+  autoDeployNonProd: false      # Disable automatic deployment to non-production environments.
+  buildTags:                    # Define tags for build-related jobs
+    - conduit-builder           # Use the `conduit-builder` tag for build-related jobs.
+  deployTags:                   # Define tags for deployment-related jobs
+    - conduit-builder           # Use the `conduit-builder` tag for deployment-related jobs.
+
+etch:                           # ETCH-specific configurations for test results
+  testResultPaths:              # Define paths for storing test results
+    - type: "JUNIT"             # Specify the type of test results (e.g., JUnit format).
+      paths:                    # Define file paths for locating test results
+        - "**/target/**/*.xml"  # Search for XML test result files within the `target` directory.
+# ================================================================================================
+# Summary:
+# - This file centralizes project-specific configurations, enabling seamless integration
+#   with Conduit and ETCH processes.
+# - Each section is modular and addresses a distinct aspect of project management.
+# ================================================================================================
