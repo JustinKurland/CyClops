@@ -1,0 +1,30 @@
+# =================================================================================================
+# File: conduit.yaml
+# Purpose:
+# This file defines the configuration settings for the Conduit environment and deployment realms.
+# It includes the environment format, template references, general settings, and specific 
+# configurations for individual realms.
+#
+# Key Features:
+# - `envidformat`: Specifies the version of the environment ID format.
+# - `templates`: References common Conduit templates for consistency across configurations.
+# - `settings`: Contains global settings, such as enabling GS Cloud integration.
+# - `realms`: Defines deployment realms, including their names, paths, and associated IDs.
+#
+# Structure:
+# - `conduit`: Top-level configuration object for Conduit settings.
+# - `envidformat`: Defines the version of the environment format used.
+# - `templates`: Specifies the path to reusable Conduit templates.
+# - `settings`: Global configurations, such as GS Cloud enablement.
+# - `realms`: A list of realms with their respective names, paths, and application directory IDs.
+# =================================================================================================
+conduit:                                                # Top-level configuration object for Conduit settings
+  envidformat: v3                                       # Specify the version of the environment ID format (v3 is used here)
+  templates: conduit/template/common                    # Path to the common Conduit template for standard configurations
+  settings:                                             # Global configuration settings
+    gscloud:                                            # GS Cloud-specific settings
+      enabled: true                                     # Enable GS Cloud integration for this environment
+  realms:                                               # Define the deployment realms
+    - name: nonprod_267412                              # Name of the non-production realm
+      path: conduit/model/realm/skydeploy_template.yaml # Path to the template for the realm
+      appdir: {did: 267412}                             # Deployment ID (DID) associated with this realm
