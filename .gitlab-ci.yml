@@ -130,6 +130,7 @@ dev_collection:               # Job definition for the development environment
     name: nonprod             # Non-production environment for testing
   when: manual                # This job must be triggered manually
 
+
 # Job: prod_collection
 # This job is designed for running production-specific data collection tasks.
 # It inherits the configuration from the 'dev_collection' job for consistency
