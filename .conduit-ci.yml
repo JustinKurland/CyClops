@@ -1,0 +1,158 @@
+# ================================================================================================
+# Variables Section
+# Purpose:
+# This section defines global variables for conduit-related operations, including 
+# the product GUID and the file to store build metadata.
+#
+# Key Features:
+# - Centralizes configuration for product identification and build metadata storage.
+# - Reduces duplication and enhances consistency across the pipeline.
+#
+# Variable Descriptions:
+# - `PRODUCT_GUID`: A unique identifier for the product.
+# - `BUILD_ID_FILE`: Specifies the file to store build-related metadata, used across stages.
+# ================================================================================================
+variables:
+  PRODUCT_GUID: product::704171  # Unique identifier for the product used in conduit processes
+  BUILD_ID_FILE: .conduit-build  # File to store build metadata or identifiers
+
+# ================================================================================================
+# Job: conduit_managed_build
+# Purpose:
+# Executes a Conduit-managed build using a dedicated script with predefined parameters.
+#
+# Key Features:
+# - Runs in the "conduit_managed_build" stage of the CI/CD pipeline.
+# - Uses the `conduit-builder` runner tag for execution.
+# - Manually triggered to allow better control over the build process.
+# - Runs only on the `master` branch or branches matching the `release-*` naming pattern.
+# - Saves the `.conduit-build` file as an artifact for downstream jobs.
+#
+# Script:
+# - Calls the Conduit build script with parameters for:
+#   - Keytab authentication.
+#   - Kerberos principal for secure access.
+#   - API endpoints for Conduit and SPR.
+#   - Product GUID and branch details.
+#   - SHA of the commit being processed.
+#   - Output file for build metadata.
+# ================================================================================================
+conduit_managed_build:                                                     # Job definition for the Conduit-managed build process
+  stage: conduit_managed_build                                             # Assign this job to the "conduit_managed_build" stage
+  tags:                                                                    # Define runner tags for this job
+    - conduit-builder                                                      # Use the runner tagged as "conduit-builder"
+  script:                                                                  # Define the commands to execute in this job
+    - >
+      /gns/area/certified/com/gs/conduit/conduit-gitlab-tools/conduit-gitlab-tools-0.28/scripts/conduit-build.sh \
+      --keytab="/var/cv/conduitp1k/creds/conduit-gitbot-p.keytab" \        # Keytab file for authentication
+      --kerb-principal="conduit-gitbot-p.GS.COM" \                         # Kerberos principal for secure access
+      --conduit-url="https://web.prod1.conduit1.site.gs.com:11143/rest" \  # API endpoint for Conduit
+      --spr-api="https://spr2.site.gs.com/api" \                           # API endpoint for SPR
+      --product-guid="product::704171" \                                   # Product GUID for the build
+      --commit-sha="${CI_COMMIT_SHA}" \                                    # SHA of the commit being built
+      --branch="${CI_COMMIT_REF_NAME}" \                                   # Name of the branch being processed
+      --output-file="${BUILD_ID_FILE}"                                     # Output file for build metadata
+  dependencies: []                                                         # No dependencies on other jobs in the pipeline
+  when: manual                                                             # The job must be manually triggered
+  only:                                                                    # Specify the branches on which this job can run
+    - master                                                               # Allow execution on the master branch
+    - /^release-.*$/                                                       # Allow execution on branches matching the "release-*" pattern
+  artifacts:                                                               # Define the files to save after job completion
+    paths:                                                                 # Specify the paths to save as artifacts
+      - .conduit-build                                                     # Save the `.conduit-build` file for downstream use
+
+# ================================================================================================
+# Job: conduit-deploy-prod_267415
+# Purpose:
+# Executes a production deployment to the `prod_267415` environment using the Conduit secure push script.
+#
+# Key Features:
+# - Runs in the `conduit_managed_deploy` stage of the CI/CD pipeline.
+# - Targets the `prod_267415` production environment.
+# - Uses the `conduit-builder` runner tag for execution.
+# - Requires the `conduit_managed_build` job to complete successfully.
+# - Manually triggered to provide better control over production deployments.
+# - Executes only on release branches matching the `release-*` pattern.
+#
+# Script:
+# - Calls the `trigger-securepush.sh` script with parameters for:
+#   - Keytab authentication.
+#   - Kerberos principal for secure access.
+#   - API endpoints for Conduit and SecurePush.
+#   - Product GUID, realm ID, and build ID.
+# ================================================================================================
+conduit-deploy-prod_267415:                                                # Job definition for deploying to the `prod_267415` environment
+  environment:                                                             # Define the deployment environment
+    name: prod_267415                                                      # Name of the environment for logging and scoping
+    url: https://prod1.securepush1.dpg.site.gs.com/ui/#/r/spr-704171-prod_267415
+                                                                           # URL for accessing the environment
+  stage: conduit_managed_deploy                                            # Assign this job to the `conduit_managed_deploy` stage
+  tags:                                                                    # Define runner tags for this job
+    - conduit-builder                                                      # Use the `conduit-builder` runner tag
+  dependencies:                                                            # Define dependencies for this job
+    - conduit_managed_build                                                # Require the `conduit_managed_build` job to complete successfully
+  script:                                                                  # Define the commands to execute in this job
+    - >
+      /gns/area/certified/com/gs/conduit/conduit-gitlab-tools/conduit-gitlab-tools-0.28/scripts/trigger-securepush.sh \
+      --keytab="/var/cv/conduitp1k/creds/conduit-gitbot-p.keytab" \        # Keytab file for authentication
+      --kerb-principal="conduit-gitbot-p.GS.COM" \                         # Kerberos principal for secure access
+      --conduit-url="https://web.prod1.conduit1.site.gs.com:11143/rest" \  # Conduit API endpoint
+      --securepush-url="https://prod1.securepush1.dpg.site.gs.com" \       # SecurePush API endpoint
+      --product-guid="${PRODUCT_GUID}" \                                   # Product GUID for the deployment
+      --await-push "true" \                                                # Wait for push confirmation
+      --realm-id="spr-704171-prod_267415" \                                # Realm ID for the deployment
+      --build-id-file="${BUILD_ID_FILE}"                                   # File containing build ID metadata
+  when: manual                                                             # The job must be triggered manually
+  only:                                                                    # Specify the branches on which this job can run
+    - /^release-.*$/                                                       # Allow execution only on release branches matching the `release-*` pattern
+  stages:                                                                  # Define the stages this job is part of
+    - conduit_managed_build                                                # Build stage
+    - conduit_managed_deploy                                               # Deploy stage
+
+# ================================================================================================
+# Job: conduit-deploy-prod_267415
+# Purpose:
+# Executes a production deployment to the `prod_267415` environment using the Conduit secure push script.
+#
+# Key Features:
+# - Runs in the `conduit_managed_deploy` stage of the CI/CD pipeline.
+# - Targets the `prod_267415` production environment.
+# - Uses the `conduit-builder` runner tag for execution.
+# - Requires the `conduit_managed_build` job to complete successfully.
+# - Manually triggered to provide better control over production deployments.
+# - Executes only on release branches matching the `release-*` pattern.
+#
+# Script:
+# - Calls the `trigger-securepush.sh` script with parameters for:
+#   - Keytab authentication.
+#   - Kerberos principal for secure access.
+#   - API endpoints for Conduit and SecurePush.
+#   - Product GUID, realm ID, and build ID.
+# ================================================================================================
+conduit-deploy-prod_267415:                                                # Job definition for deploying to the `prod_267415` environment
+  environment:                                                             # Define the deployment environment
+    name: prod_267415                                                      # Name of the environment for logging and scoping
+    url: https://prod1.securepush1.dpg.site.gs.com/ui/#/r/spr-704171-prod_267415
+                                                                           # URL for accessing the environment
+  stage: conduit_managed_deploy                                            # Assign this job to the `conduit_managed_deploy` stage
+  tags:                                                                    # Define runner tags for this job
+    - conduit-builder                                                      # Use the `conduit-builder` runner tag
+  dependencies:                                                            # Define dependencies for this job
+    - conduit_managed_build                                                # Require the `conduit_managed_build` job to complete successfully
+  script:                                                                  # Define the commands to execute in this job
+    - >
+      /gns/area/certified/com/gs/conduit/conduit-gitlab-tools/conduit-gitlab-tools-0.28/scripts/trigger-securepush.sh \
+      --keytab="/var/cv/conduitp1k/creds/conduit-gitbot-p.keytab" \        # Keytab file for authentication
+      --kerb-principal="conduit-gitbot-p.GS.COM" \                         # Kerberos principal for secure access
+      --conduit-url="https://web.prod1.conduit1.site.gs.com:11143/rest" \  # Conduit API endpoint
+      --securepush-url="https://prod1.securepush1.dpg.site.gs.com" \       # SecurePush API endpoint
+      --product-guid="${PRODUCT_GUID}" \                                   # Product GUID for the deployment
+      --await-push "true" \                                                # Wait for push confirmation
+      --realm-id="spr-704171-prod_267415" \                                # Realm ID for the deployment
+      --build-id-file="${BUILD_ID_FILE}"                                   # File containing build ID metadata
+  when: manual                                                             # The job must be triggered manually
+  only:                                                                    # Specify the branches on which this job can run
+    - /^release-.*$/                                                       # Allow execution only on release branches matching the `release-*` pattern
+  stages:                                                                  # Define the stages this job is part of
+    - conduit_managed_build                                                # Build stage
+    - conduit_managed_deploy                                               # Deploy stage
