@@ -218,8 +218,8 @@ build_image_nonprod:  # Job definition for building Docker images in non-product
                      # Specify the Python base image for the build
   script:            # Define the commands to execute in the job
     - echo "Building docker image using ${BASE_IMG}"
-    - kaniko -c ${CI_PROJECT_DIR} \
-        -d ${CI_REGISTRY_IMAGE}:nonprod_current \
+    - kaniko -c $CI_PROJECT_DIR \
+        -d $CI_REGISTRY_IMAGE:nonprod_current \
         --build-arg BASE_IMG=${BASE_IMG} \
         --build-arg GIT_TOKEN=${CI_JOB_TOKEN} \
         --build-arg ENVIRONMENT=${CI_ENVIRONMENT_NAME} \
@@ -256,8 +256,8 @@ build_image_prod:               # Job definition for building Docker images in p
   script:                       # Override the script for production-specific build
     - echo "Building docker image using ${BASE_IMG}"  
                                 # Log the base image being used
-    - kaniko -c ${CI_PROJECT_DIR} \
-        -d ${CI_REGISTRY_IMAGE}:${RELEASE} \
+    - kaniko -c $CI_PROJECT_DIR \
+        -d $CI_REGISTRY_IMAGE:${RELEASE} \
         --build-arg BASE_IMG=${BASE_IMG} \
         --build-arg GIT_TOKEN=${CI_JOB_TOKEN} \
         --build-arg ENVIRONMENT=${CI_ENVIRONMENT_NAME} \
@@ -359,7 +359,7 @@ orchestrator_test:   # Job definition for testing the orchestrator functionality
   script:            # Commands to execute in this job
     - pip install -r requirements-dev.txt  
                      # Install all development dependencies
-    - python src/cycad/orchestrator.py     
+    - python3 src/cycad/orchestrator.py     
                      # Run the orchestrator script to verify functionality
   environment:       # Define the environment for this job
     name: nonprod    # Restrict execution to the non-production environment
